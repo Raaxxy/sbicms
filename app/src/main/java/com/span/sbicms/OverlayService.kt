@@ -17,9 +17,11 @@ import kotlinx.coroutines.*
 class OverlayService : Service() {
 
     private var overlayView: View? = null
+    private var systemUIBlocker: View? = null
     private var windowManager: WindowManager? = null
     private var serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var chromeMonitorJob: Job? = null
+    private var systemUIEnforcerJob: Job? = null
 
     companion object {
         private const val NOTIFICATION_ID = 1001
@@ -42,38 +44,168 @@ class OverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         android.util.Log.d("KioskApp", "OverlayService onStartCommand called")
         startForeground(NOTIFICATION_ID, createNotification())
-        showOverlay()
-        startChromeMonitoring()
 
-        // Enforce immersive mode periodically
-        startImmersiveModeEnforcer()
+        // Show overlay
+        showOverlay()
+
+        // Create system UI blockers
+        createSystemUIBlockers()
+
+        // Start monitoring and enforcement
+        startChromeMonitoring()
+        startSystemUIEnforcement()
 
         return START_STICKY
     }
 
-    private fun startImmersiveModeEnforcer() {
-        serviceScope.launch {
+    private fun createSystemUIBlockers() {
+        try {
+            // Create invisible views to block system UI areas
+            createStatusBarBlocker()
+            createNavigationBarBlocker()
+            android.util.Log.d("KioskApp", "System UI blockers created")
+        } catch (e: Exception) {
+            android.util.Log.e("KioskApp", "Failed to create system UI blockers", e)
+        }
+    }
+
+    private fun createStatusBarBlocker() {
+        try {
+            val displayMetrics = DisplayMetrics()
+            windowManager?.defaultDisplay?.getRealMetrics(displayMetrics)
+
+            val statusBarHeight = getStatusBarHeight()
+            if (statusBarHeight > 0) {
+                val statusBarBlocker = View(this).apply {
+                    setBackgroundColor(Color.TRANSPARENT)
+                    isClickable = true
+                    isFocusable = false
+                }
+
+                val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+                }
+
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    statusBarHeight,
+                    layoutFlag,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                            WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP
+                    x = 0
+                    y = 0
+                }
+
+                windowManager?.addView(statusBarBlocker, params)
+                android.util.Log.d("KioskApp", "Status bar blocker added")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("KioskApp", "Failed to create status bar blocker", e)
+        }
+    }
+
+    private fun createNavigationBarBlocker() {
+        try {
+            val displayMetrics = DisplayMetrics()
+            windowManager?.defaultDisplay?.getRealMetrics(displayMetrics)
+
+            val navBarHeight = getNavigationBarHeight()
+            if (navBarHeight > 0) {
+                val navBarBlocker = View(this).apply {
+                    setBackgroundColor(Color.TRANSPARENT)
+                    isClickable = true
+                    isFocusable = false
+                }
+
+                val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY
+                }
+
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    navBarHeight,
+                    layoutFlag,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.BOTTOM
+                    x = 0
+                    y = 0
+                }
+
+                windowManager?.addView(navBarBlocker, params)
+                android.util.Log.d("KioskApp", "Navigation bar blocker added")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("KioskApp", "Failed to create navigation bar blocker", e)
+        }
+    }
+
+    private fun getStatusBarHeight(): Int {
+        val resourceId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (resourceId > 0) resources.getDimensionPixelSize(resourceId) else 0
+    }
+
+    private fun getNavigationBarHeight(): Int {
+        val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (resourceId > 0) resources.getDimensionPixelSize(resourceId) else 0
+    }
+
+    private fun startSystemUIEnforcement() {
+        systemUIEnforcerJob?.cancel()
+        systemUIEnforcerJob = serviceScope.launch {
+            android.util.Log.d("KioskApp", "Starting aggressive system UI enforcement")
+
             while (isActive) {
-                delay(2000) // Check every 2 seconds
+                delay(1000) // Check every second
                 try {
-                    enforceImmersiveMode()
+                    enforceSystemUIHiding()
                 } catch (e: Exception) {
-                    android.util.Log.e("KioskApp", "Error enforcing immersive mode", e)
+                    android.util.Log.e("KioskApp", "Error in system UI enforcement", e)
                 }
             }
         }
     }
 
-    private fun enforceImmersiveMode() {
+    private fun enforceSystemUIHiding() {
         try {
-            // This is a background service approach to maintain immersive mode
-            // We'll send a broadcast to any activities that might be visible
+            // Send broadcast to any listening activities to enforce immersive mode
             val intent = Intent("com.span.sbicms.ENFORCE_IMMERSIVE")
             sendBroadcast(intent)
 
-            android.util.Log.d("KioskApp", "Enforced immersive mode broadcast sent")
+            // Try to collapse status bar (requires system permissions on newer Android)
+            try {
+                @Suppress("DEPRECATION")
+                val service = getSystemService("statusbar")
+                val statusBarManager = Class.forName("android.app.StatusBarManager")
+                val collapse = statusBarManager.getMethod("collapsePanels")
+                collapse.invoke(service)
+            } catch (e: Exception) {
+                // Expected to fail on newer Android versions
+            }
+
+            // Try to close system dialogs
+            try {
+                val closeDialogIntent = Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+                sendBroadcast(closeDialogIntent)
+            } catch (e: Exception) {
+                // May fail on newer Android versions
+            }
+
+            android.util.Log.d("KioskApp", "System UI enforcement attempted")
         } catch (e: Exception) {
-            android.util.Log.e("KioskApp", "Failed to enforce immersive mode", e)
+            android.util.Log.e("KioskApp", "Failed to enforce system UI hiding", e)
         }
     }
 
@@ -106,7 +238,7 @@ class OverlayService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Kiosk Mode Active")
-            .setContentText("Browser overlay is running")
+            .setContentText("Browser overlay and system control active")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -123,7 +255,7 @@ class OverlayService : Service() {
         try {
             android.util.Log.d("KioskApp", "Creating overlay view")
             overlayView = createOverlayView()
-            val layoutParams = createLayoutParams()
+            val layoutParams = createOverlayLayoutParams()
 
             android.util.Log.d("KioskApp", "Adding overlay to window manager")
             windowManager?.addView(overlayView, layoutParams)
@@ -171,7 +303,7 @@ class OverlayService : Service() {
         }
     }
 
-    private fun createLayoutParams(): WindowManager.LayoutParams {
+    private fun createOverlayLayoutParams(): WindowManager.LayoutParams {
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -186,7 +318,8 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -205,7 +338,7 @@ class OverlayService : Service() {
             var consecutiveFailures = 0
 
             while (isActive) {
-                delay(10000) // Check every 10 seconds (much less aggressive)
+                delay(8000) // Check every 8 seconds
 
                 val isChromeRunning = isChromeInForeground()
                 android.util.Log.d("KioskApp", "Chrome monitoring - Chrome running: $isChromeRunning")
@@ -221,12 +354,12 @@ class OverlayService : Service() {
                     consecutiveFailures++
                     android.util.Log.d("KioskApp", "Chrome not detected, consecutive failures: $consecutiveFailures")
 
-                    // Only try to launch Chrome after 3 consecutive failures (30 seconds)
-                    if (consecutiveFailures >= 3) {
-                        android.util.Log.d("KioskApp", "Multiple Chrome failures, attempting to launch")
+                    // Only try to launch Chrome after 2 consecutive failures (16 seconds)
+                    if (consecutiveFailures >= 2) {
+                        android.util.Log.d("KioskApp", "Chrome failures detected, attempting to relaunch")
                         launchChrome()
                         consecutiveFailures = 0 // Reset after attempting launch
-                        delay(15000) // Extra delay after launching
+                        delay(10000) // Extra delay after launching
                     }
                 }
             }
@@ -243,8 +376,7 @@ class OverlayService : Service() {
             runningProcesses?.forEach { processInfo ->
                 CHROME_PACKAGES.forEach { chromePackage ->
                     if (processInfo.processName.equals(chromePackage, ignoreCase = true) ||
-                        processInfo.processName.startsWith("$chromePackage:", ignoreCase = true) ||
-                        processInfo.processName.contains("chrome", ignoreCase = true)) {
+                        processInfo.processName.startsWith("$chromePackage:", ignoreCase = true)) {
                         chromeRunning = true
                         android.util.Log.d("KioskApp", "Found Chrome process: ${processInfo.processName}")
                         return@forEach
@@ -259,14 +391,14 @@ class OverlayService : Service() {
                     val currentTime = System.currentTimeMillis()
                     val stats = usageStatsManager.queryUsageStats(
                         android.app.usage.UsageStatsManager.INTERVAL_BEST,
-                        currentTime - 60000, // Last minute
+                        currentTime - 30000, // Last 30 seconds
                         currentTime
                     )
 
                     stats?.forEach { usageStat ->
                         CHROME_PACKAGES.forEach { chromePackage ->
                             if (usageStat.packageName.equals(chromePackage, ignoreCase = true) &&
-                                usageStat.lastTimeUsed > currentTime - 30000) { // Used in last 30 seconds
+                                usageStat.lastTimeUsed > currentTime - 20000) { // Used in last 20 seconds
                                 chromeRunning = true
                                 android.util.Log.d("KioskApp", "Found Chrome in recent usage: ${usageStat.packageName}")
                                 return@forEach
@@ -275,27 +407,6 @@ class OverlayService : Service() {
                     }
                 } catch (e: Exception) {
                     android.util.Log.d("KioskApp", "Usage stats not available: ${e.message}")
-                }
-            }
-
-            // Method 3: Check if Chrome package is installed and assume running if launched recently
-            if (!chromeRunning) {
-                val currentTime = System.currentTimeMillis()
-                val lastLaunchTime = getSharedPreferences("chrome_prefs", Context.MODE_PRIVATE)
-                    .getLong("last_chrome_launch", 0)
-
-                if (currentTime - lastLaunchTime < 60000) { // Within 1 minute of launch
-                    // Check if Chrome is actually installed
-                    for (chromePackage in CHROME_PACKAGES) {
-                        try {
-                            packageManager.getPackageInfo(chromePackage, 0)
-                            chromeRunning = true
-                            android.util.Log.d("KioskApp", "Chrome launched recently and is installed, assuming running")
-                            break
-                        } catch (e: Exception) {
-                            // Package not found, continue
-                        }
-                    }
                 }
             }
 
@@ -326,6 +437,7 @@ class OverlayService : Service() {
             launchIntent?.let {
                 it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 it.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                it.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 startActivity(it)
                 android.util.Log.d("KioskApp", "OverlayService Chrome launch intent sent")
 
@@ -350,14 +462,32 @@ class OverlayService : Service() {
             }
             overlayView = null
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("KioskApp", "Error hiding overlay", e)
+        }
+    }
+
+    private fun hideSystemUIBlockers() {
+        try {
+            systemUIBlocker?.let { view ->
+                if (view.parent != null) {
+                    windowManager?.removeView(view)
+                }
+            }
+            systemUIBlocker = null
+        } catch (e: Exception) {
+            android.util.Log.e("KioskApp", "Error hiding system UI blockers", e)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        android.util.Log.d("KioskApp", "OverlayService onDestroy")
+
         chromeMonitorJob?.cancel()
+        systemUIEnforcerJob?.cancel()
         serviceScope.cancel()
+
         hideOverlay()
+        hideSystemUIBlockers()
     }
 }

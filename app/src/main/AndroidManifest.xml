@@ -8,20 +8,23 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
-    <!-- Permissions for device admin and kiosk mode -->
+    <!-- Enhanced permissions for device admin -->
     <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Permission to query other apps -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
-    <!-- Permissions for immersive mode -->
+    <!-- Permissions for immersive mode and system UI control -->
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" tools:ignore="ProtectedPermissions" />
-
-    <!-- Permission for programmatic interaction (might help with auto-dismiss) -->
+    <uses-permission android:name="android.permission.STATUS_BAR" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.INJECT_EVENTS" tools:ignore="ProtectedPermissions" />
 
     <!-- Permission for usage stats (better Chrome detection) -->
@@ -29,6 +32,12 @@
 
     <!-- Boot permission for auto-start -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Reorder tasks permission for kiosk control -->
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
+
+    <!-- Get tasks permission for app monitoring -->
+    <uses-permission android:name="android.permission.GET_TASKS" tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="true"
@@ -39,18 +48,28 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.SBICMSKiosk"
+        android:persistent="true"
         tools:targetApi="31">
 
-        <!-- Main Activity -->
+        <!-- Main Activity - LAUNCHER AND HOME -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleInstance"
             android:screenOrientation="portrait"
-            android:configChanges="orientation|keyboardHidden|screenSize">
-            <intent-filter>
+            android:configChanges="orientation|keyboardHidden|screenSize|layoutDirection"
+            android:excludeFromRecents="false"
+            android:taskAffinity="">
+            <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <!-- Handle home button press -->
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
@@ -62,16 +81,31 @@
             android:exported="false"
             android:launchMode="singleInstance"
             android:screenOrientation="portrait"
-            android:theme="@android:style/Theme.NoDisplay"
-            android:configChanges="orientation|keyboardHidden|screenSize"
-            tools:ignore="MissingClass" />
+            android:theme="@style/Theme.SBICMSKiosk.Invisible"
+            android:configChanges="orientation|keyboardHidden|screenSize|layoutDirection"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:process=":kiosk_launcher" />
+
+        <!-- Device Admin Test Activity (for debugging) -->
+        <activity
+            android:name=".DeviceAdminTestActivity"
+            android:exported="true"
+            android:label="Device Admin Test"
+            android:theme="@android:style/Theme.Material.Light">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <!-- Overlay Service -->
         <service
             android:name=".OverlayService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse"
+            android:process=":overlay_service">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="kiosk_mode_overlay" />
@@ -81,13 +115,15 @@
         <receiver
             android:name=".KioskDeviceAdminReceiver"
             android:exported="true"
+            android:enabled="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
                 android:name="android.app.device_admin"
                 android:resource="@xml/device_admin_receiver" />
-            <intent-filter>
+            <intent-filter android:priority="1000">
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
             </intent-filter>
         </receiver>
 
@@ -100,7 +136,19 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
                 <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Home button receiver -->
+        <receiver
+            android:name=".HomeButtonReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.CLOSE_SYSTEM_DIALOGS" />
             </intent-filter>
         </receiver>
 

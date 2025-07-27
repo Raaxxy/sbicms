@@ -5,5 +5,7 @@
         <disable-keyguard />
         <limit-password />
         <watch-login />
+        <reset-password />
+        <wipe-data />
     </uses-policies>
 </device-admin>
