@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SBI CMS Kiosk</string>
+    <string name="device_admin_description">Enable device admin to use kiosk mode features</string>
+    <string name="overlay_permission_required">Overlay permission is required for kiosk mode</string>
+    <string name="chrome_not_found">Chrome browser not found. Please install Chrome.</string>
+    <string name="kiosk_mode_active">Kiosk Mode Active</string>
+    <string name="overlay_service_running">Browser overlay is running</string>
+</resources>
